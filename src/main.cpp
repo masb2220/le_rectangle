@@ -1,17 +1,7 @@
 #include <Wire.h>
 #include "Adafruit_TCS34725.h"
-
-/* Example code for the Adafruit TCS34725 breakout library */
-
-/* Connect SCL    to analog 5
-   Connect SDA    to analog 4
-   Connect VDD    to 3.3V DC
-   Connect GROUND to common ground */
-   
-/* Initialise with default values (int time = 2.4ms, gain = 1x) */
-// Adafruit_TCS34725 tcs = Adafruit_TCS34725();
-
-/* Initialise with specific int time and gain values */
+//============ Variable Globale ==========//
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
 enum State {
   reading,
   pink,
@@ -23,10 +13,10 @@ enum State {
 State state = reading;
 int threshold = 600;
 
+//============ Déclaration de Fonction ==========//
 void colorReaction();
 int position_robot(int threshold);
 
-Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
 
 void setup(void) {
   Serial.begin(9600);
@@ -47,8 +37,8 @@ void setup(void) {
   }
   digitalWrite(41, HIGH);
   digitalWrite(42, HIGH);
-  digitalWrite(45, HIGH);
-  digitalWrite(41, HIGH);
+  digitalWrite(43, HIGH);
+  digitalWrite(44, HIGH);
   digitalWrite(45, HIGH);
 }
 
