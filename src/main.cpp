@@ -1,5 +1,7 @@
 #include <Wire.h>
 #include "Adafruit_TCS34725.h"
+#include <IRremote.h>
+#include <LibRobus.h>
 //============ Variable Globale ==========//
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
 enum State {
@@ -16,10 +18,11 @@ int threshold = 600;
 //============ Déclaration de Fonction ==========//
 void colorReaction();
 int position_robot(int threshold);
-
+int reception_signal();
 
 void setup(void) {
   Serial.begin(9600);
+  
   pinMode(45, OUTPUT);
   pinMode(43, OUTPUT);
   pinMode(41, OUTPUT);
@@ -28,7 +31,8 @@ void setup(void) {
   pinMode(0, INPUT);
   pinMode(1, INPUT);
   pinMode(2, INPUT);
-
+  int pin_recepteur = 37;
+  IrReceiver.begin(pin_recepteur); // Initialise le IRsender de la librairie
   if (tcs.begin()) {
     Serial.println("Found sensor");
   } else {
@@ -43,7 +47,7 @@ void setup(void) {
 }
 
 void loop(void) {
-  colorReaction();
+  receiveIR();
 }
 
 void colorReaction(){
@@ -120,4 +124,34 @@ int position_robot(int threshold){
     return 2;
   }
 
+}
+
+int reception_signal(){
+  if (IrReceiver.decode() & (IrReceiver.decodedIRData.address == 0x09)) {
+ 
+    int data = IrReceiver.decodedIRData.command;
+    
+    if (data == 0x03){
+      return 1;
+    }
+    else if (data == 0x03){
+      return 2;
+    }
+    else {
+      return 37;
+    }
+  }
+ 
+  else {
+    return 0;
+  }
+}
+
+void receiveIR() {
+  if (IrReceiver.decode()) {
+    if (IrReceiver.decodedIRData.address == 0x09) {
+      Serial.println(IrReceiver.decodedIRData.command);
+    }
+    IrReceiver.resume();  // ready the receiver for the next signal
+  }
 }
