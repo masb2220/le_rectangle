@@ -41,5 +41,5 @@ extern decode_results results;
 void colorReaction();
 int position_robot();
 void suivre_ligne();
-int receiveIR();
+uint32_t receiveIR();
 void beep(int count);

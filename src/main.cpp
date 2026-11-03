@@ -66,7 +66,7 @@ void setup() {
     Serial.println("Found sensor");
   } else {
     Serial.println("No TCS34725 found ... check your connections");
-    //while (1);
+    while (1);
   }
   digitalWrite(41, HIGH);
   digitalWrite(42, HIGH);
