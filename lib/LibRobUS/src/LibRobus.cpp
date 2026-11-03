@@ -26,15 +26,18 @@ Class to interface some of the ArduinoX "on board" functionnalities
 void BoardInit(){
   // Initialize debug communication on Serial0
   Serial.begin(BAUD_RATE_SERIAL0);
-  
+
   // Init ArduinoX
   __AX__.init();
 
   // Init Robus
   __Robus__.init();
 
-  // init telecommande
-  __irrecv__.enableIRIn(); // Start the receiver
+  // Le robot utilise les distances analogiques A0/A3, pas une telecommande IR.
+  // Eviter l'interruption IRremote de 50 us lorsque cette fonction est inutile.
+#ifdef ROBUS_ENABLE_IR_REMOTE
+  __irrecv__.enableIRIn();
+#endif
 };
 
 void AudioInit(){
