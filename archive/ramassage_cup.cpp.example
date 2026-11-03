@@ -1,0 +1,233 @@
+#include "cup.h"
+#include "distance_ir.h"
+#include "arm.h"
+#include "robot_control.h"
+#include "robot_serial.h"
+#include <math.h>
+#include <stdio.h>
+
+namespace {
+constexpr float PI_F = 3.14159265359f;
+constexpr float SCAN_SPEED = 0.20f; // rad/s, environ 11.5 degres/s.
+constexpr float DETECTION_CM = 60.0f;
+constexpr float MAX_PAIR_SPAN = 0.9f; // rejeter une paire etalee sur >51 degres.
+constexpr unsigned long SETTLE_MS = 400;
+enum class State { IDLE, RAISE, SCAN, SETTLE, CENTER, APPROACH_WAIT, APPROACH_MOVE, OPEN, LOWER, FINAL_MOVE, CLOSE, LIFT, DONE, FAILED };
+State state = State::IDLE;
+bool scanOnlyMode = false;
+float gripCm = NAN; // Distance IR a laquelle descendre la pince.
+float reachCm = NAN; // Recul final, pince descendue, mesure par encodeurs.
+float previousTheta = 0;
+float swept = 0;
+float targetBearing = 0;
+float approachTravel = 0;
+unsigned long phaseStart = 0;
+unsigned long runStart = 0;
+struct Passage {
+    bool inside = false;
+    bool complete = false;
+    uint8_t hits = 0;
+    uint8_t misses = 0;
+    float entry = 0;
+    float exit = 0;
+    float distanceSum = 0;
+    uint16_t distanceCount = 0;
+    unsigned long date = 0;
+};
+Passage passages[2];
+float wrap(float a) { while(a > PI_F) a -= 2*PI_F; while(a < -PI_F) a += 2*PI_F; return a; }
+void phase(State next) { state = next; phaseStart = millis(); }
+void fail(const char *message) {
+    robot_control_cancel();
+    phase(State::FAILED);
+    robot_serial_message(message);
+}
+bool pose(float &theta) {
+    float x, y;
+    return robot_control_get_pose(x, y, theta);
+}
+void observe(uint8_t id, float theta) {
+    Passage &p = passages[id];
+    const DistanceIR d = lireDistance(id);
+    if (!d.dateMs || d.dateMs == p.date) return;
+    p.date = d.dateMs;
+    const bool hit = d.valide && d.cm <= DETECTION_CM;
+    if (hit) {
+        if (!p.complete) { p.distanceSum += d.cm; ++p.distanceCount; }
+        p.misses = 0;
+        if (!p.inside && !p.complete) {
+            if (!p.hits) p.entry = theta;
+            if (++p.hits >= 2) p.inside = true;
+        }
+    } else {
+        p.hits = 0;
+        if (p.inside) {
+            if (!p.misses) p.exit = theta;
+            if (++p.misses >= 3) { p.complete = true; p.inside = false; }
+        }
+    }
+}
+}
+void cupBegin() { initDistance(); armBegin(); }
+bool cupSetGripDistance(float cm) {
+    if (state != State::IDLE && state != State::DONE && state != State::FAILED) return false;
+    if (!isfinite(cm) || cm < 12 || cm > 55) return false;
+    gripCm = cm;
+    return true;
+}
+bool cupSetReachDistance(float cm) {
+    if (state != State::IDLE && state != State::DONE && state != State::FAILED) return false;
+    if (!isfinite(cm) || cm <= 0 || cm > 30) return false;
+    reachCm = cm;
+    return true;
+}
+bool cupStart(bool scanOnly) {
+    if (!robot_control_finished() || (!scanOnly && (!isfinite(gripCm) || !isfinite(reachCm) || reachCm >= gripCm)) ||
+        (state != State::IDLE && state != State::DONE && state != State::FAILED)) return false;
+    if (!pose(previousTheta)) return false;
+    scanOnlyMode = scanOnly;
+    passages[0] = Passage{};
+    passages[1] = Passage{};
+    swept = 0;
+    approachTravel = 0;
+    flipUp();
+    phase(State::RAISE);
+    runStart = millis();
+    robot_serial_message("Relevage de la pince pour degager les capteurs.");
+    return true;
+}
+void cupAbort() {
+    robot_control_cancel();
+    phase(State::IDLE);
+    robot_serial_message("Recherche annulee, roues arretees. Pince maintenue.");
+}
+void cupUpdate() {
+    // L'acquisition est appelee separement avec un budget temps suffisant.
+    if (state == State::IDLE || state == State::DONE || state == State::FAILED) return;
+    if (robot_control_fault()) { phase(State::FAILED); robot_serial_message("Defaut PID : sequence interrompue."); return; }
+    if (millis() - runStart > 120000UL) { fail("Delai global depasse."); return; }
+    float theta;
+    if (!pose(theta)) { fail("Pose indisponible."); return; }
+    if (state == State::RAISE) {
+        if (millis() - phaseStart < 2000) return;
+        if (!pose(previousTheta) || !robot_control_start_rotation(2 * PI_F, SCAN_SPEED)) {
+            fail("Balayage refuse."); return;
+        }
+        phase(State::SCAN);
+        robot_serial_message("Balayage continu lance, pince relevee.");
+        return;
+    }
+    if (state == State::SCAN) {
+        swept += wrap(theta - previousTheta);
+        previousTheta = theta;
+        observe(0, swept);
+        observe(1, swept);
+        if (passages[0].complete && passages[1].complete) {
+            const float a = (passages[0].entry + passages[0].exit) * 0.5f;
+            const float b = (passages[1].entry + passages[1].exit) * 0.5f;
+            // Afficher les mesures reelles avant toute decision de rejet.
+            for (uint8_t i = 0; i < 2; ++i) {
+                char detail[96];
+                const Passage &p = passages[i];
+                snprintf(detail, sizeof(detail), "Passage IR %u: entree=%d sortie=%d largeur=%d deg distance=%d mm", i,
+                    int(p.entry*180/PI_F), int(p.exit*180/PI_F), int((p.exit-p.entry)*180/PI_F),
+                    p.distanceCount ? int(p.distanceSum/p.distanceCount*10) : -1);
+                robot_serial_message(detail);
+            }
+            char detail[64];
+            snprintf(detail, sizeof(detail), "Ecart centres=%d deg, seuil provisoire=%d deg", int(fabsf(a-b)*180/PI_F), int(MAX_PAIR_SPAN*180/PI_F));
+            robot_serial_message(detail);
+            if (fabsf(a-b) > MAX_PAIR_SPAN ||
+                passages[0].exit - passages[0].entry > MAX_PAIR_SPAN ||
+                passages[1].exit - passages[1].entry > MAX_PAIR_SPAN) {
+                fail("Paire rejetee par les seuils angulaires provisoires (voir mesures)."); return;
+            }
+            // Hypothese : capteurs symetriques autour de l'axe arriere.
+            targetBearing = wrap(theta + (a+b)*0.5f - swept);
+            robot_control_cancel();
+            phase(State::SETTLE);
+            robot_serial_message("Deux passages detectes. Arret puis centrage.");
+        } else if (robot_control_finished()) fail("360 degres termines sans paire complete.");
+        return;
+    }
+    if (state == State::SETTLE && millis() - phaseStart >= SETTLE_MS) {
+        if (!robot_control_start_rotation(wrap(targetBearing-theta), SCAN_SPEED)) {
+            fail("Centrage refuse."); return;
+        }
+        phase(State::CENTER);
+    } else if (state == State::CENTER && robot_control_finished()) {
+        if (scanOnlyMode) {
+            phase(State::DONE);
+            robot_serial_message("SCAN termine : centre, sans approche ni saisie.");
+            cupPrintStatus();
+            return;
+        }
+        phase(State::APPROACH_WAIT);
+        robot_serial_message("Centre. Recul avec pince relevee et capteurs degages.");
+    } else if (state == State::APPROACH_WAIT && millis() - phaseStart >= 150) {
+        const DistanceIR right = lireDistance(0), left = lireDistance(1);
+        if (!right.valide || !left.valide) { fail("Approche annulee : distance invalide ou cible perdue."); return; }
+        if (fabsf(right.cm-left.cm) > 8.0f) {
+            char detail[96];
+            snprintf(detail, sizeof(detail), "IR droit=%d mm gauche=%d mm ecart=%d mm (seuil=80 mm)",
+                int(right.cm*10), int(left.cm*10), int(fabsf(right.cm-left.cm)*10));
+            robot_serial_message(detail);
+            fail("Approche annulee : ecart IR trop grand, verifier montage et calibration."); return;
+        }
+        const float nearest = fminf(right.cm, left.cm);
+        if (nearest < gripCm - 2.0f) { fail("Verre trop proche : corriger la position manuellement."); return; }
+        if (nearest <= gripCm + 1.0f) {
+            // Roues au repos avant descente, puis recul final de REACH au PID.
+            robot_control_cancel();
+            openThumb();
+            phase(State::OPEN);
+            robot_serial_message("Distance atteinte. Roues arretees, ouverture.");
+        } else {
+            const float step = fminf(0.02f, (nearest-gripCm)*0.01f);
+            if (approachTravel + step > 0.7f) { fail("Recul maximal atteint."); return; }
+            if (!robot_control_start_relative(-step, 0)) { fail("Recul refuse."); return; }
+            approachTravel += step;
+            phase(State::APPROACH_MOVE);
+        }
+    } else if (state == State::APPROACH_MOVE) {
+        // Arreter aussi pendant le recul si une mesure valide indique une proximite excessive.
+        const DistanceIR r = lireDistance(0), l = lireDistance(1);
+        if ((r.valide && r.cm < gripCm-2) || (l.valide && l.cm < gripCm-2)) {
+            fail("Trop proche pendant le recul."); return;
+        }
+        if (robot_control_finished()) phase(State::APPROACH_WAIT);
+    } else if (state == State::OPEN && millis()-phaseStart >= 1000) {
+        flipDown();
+        phase(State::LOWER);
+        robot_serial_message("Descente de la pince. Mesures IR ignorees pour la saisie.");
+    } else if (state == State::LOWER && millis()-phaseStart >= 2000) {
+        // Capteurs masques : utiliser seulement l'odometrie et les PID existants.
+        if (!robot_control_start_relative(-reachCm * 0.01f, 0)) {
+            fail("Deplacement final refuse."); return;
+        }
+        phase(State::FINAL_MOVE);
+        robot_serial_message("Recul final au PID, pince descendue, sans lecture IR.");
+    } else if (state == State::FINAL_MOVE && robot_control_finished()) {
+        closeThumb();
+        phase(State::CLOSE);
+        robot_serial_message("Distance X parcourue. Fermeture de la pince.");
+    } else if (state == State::CLOSE && millis()-phaseStart >= 1500) {
+        flipUp();
+        phase(State::LIFT);
+    } else if (state == State::LIFT && millis()-phaseStart >= 2000) {
+        phase(State::DONE);
+        robot_serial_message("Sequence terminee. Prise non verifiee (aucun capteur de pince).");
+    }
+}
+void cupPrintStatus() {
+    char message[64];
+    snprintf(message, sizeof(message), "Etat=%u balayage=%d deg saisie=%d cm", unsigned(state), int(swept*180/PI_F), isfinite(gripCm)?int(gripCm):-1);
+    robot_serial_message(message);
+    snprintf(message, sizeof(message), "Recul final X=%d mm", isfinite(reachCm)?int(reachCm*10):-1);
+    robot_serial_message(message);
+    for (uint8_t i=0;i<2;++i) {
+        const DistanceIR d=lireDistance(i);
+        snprintf(message,sizeof(message),"IR %u : brut=%u cm=%d valide=%u",i,d.brut,d.valide?int(d.cm):-1,unsigned(d.valide));
+        robot_serial_message(message);
+    }
+}
