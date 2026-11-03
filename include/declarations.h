@@ -1,4 +1,4 @@
-
+#pragma once
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -41,4 +41,5 @@ extern decode_results results;
 void colorReaction();
 int position_robot();
 void suivre_ligne();
-void receiveIR();
+int receiveIR();
+void beep(int count);

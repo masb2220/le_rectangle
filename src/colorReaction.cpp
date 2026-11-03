@@ -33,7 +33,7 @@ void colorReaction() {
         state = blue;
       }
       if (r >= 200 && r <= 600 && g >= 600 && g <= 1100 && b >= 750) {
-        Serial.println("blue detected");   // TODO: orange needs its own RGB ranges
+        Serial.println("orange detected");   // TODO: orange needs its own RGB ranges
         state = orange;
       }
       break;
@@ -47,4 +47,19 @@ void colorReaction() {
       state = reading;
       break;
   }
+}
+
+void bleu(){ //Quand le case bleu est appellé, la fonction bleu() doit être appelée, elle s'éxécute et vérifies le signal reçu, losrsqu'il s'agit du bon, la fonction se brise et le case continues, le code dans le case doit inclure le retour à l'état "normal" de suivre la ligne
+  MOTOR_SetSpeed(LEFT, 0);
+  MOTOR_SetSpeed(RIGHT, 0); //arrete le robot
+ 
+  
+  int i = 0;
+  while (i<1){
+    int signal = receiveIR(); //On store dans signal la valeur de retour de la fonction reception signal
+    if (signal == 1){ //Cherche le signal 1, s'il est trouvé, on sort de la boucle et ensuite de la fonction
+      return;
+    }
+  }
+  
 }

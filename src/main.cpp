@@ -1,11 +1,12 @@
 #include "declarations.h"
+#include "LibRobus.h"
 
 void setup(void) {
   Serial.begin(9600);
   pinMode(gauche, INPUT);
   pinMode(milieu, INPUT);
   pinMode(droite, INPUT);
-  //BoardInit();
+  BoardInit();
   pinMode(45, OUTPUT);
   pinMode(43, OUTPUT);
   pinMode(41, OUTPUT);
@@ -21,7 +22,7 @@ void setup(void) {
     Serial.println("Found sensor");
   } else {
     Serial.println("No TCS34725 found ... check your connections");
-    while (1);
+    //while (1);
   }
 
   digitalWrite(41, HIGH);
@@ -32,5 +33,5 @@ void setup(void) {
 }
 
 void loop(void) {
-  receiveIR();
+  
 }
