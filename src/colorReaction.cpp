@@ -23,13 +23,13 @@ void colorReaction() {
       colorTemp = tcs.calculateColorTemperature(r, g, b);
       lux = tcs.calculateLux(r, g, b);
 
-      Serial.print("Color Temp: "); Serial.print(colorTemp, DEC); Serial.print(" K - ");
+      /* Serial.print("Color Temp: "); Serial.print(colorTemp, DEC); Serial.print(" K - ");
       Serial.print("Lux: "); Serial.print(lux, DEC); Serial.print(" - ");
       Serial.print("R: "); Serial.print(r, DEC); Serial.print(" ");
       Serial.print("G: "); Serial.print(g, DEC); Serial.print(" ");
       Serial.print("B: "); Serial.print(b, DEC); Serial.print(" ");
       Serial.print("C: "); Serial.print(c, DEC); Serial.print(" ");
-      Serial.println(" ");
+      Serial.println(" "); */
 
       if (r >= 800 && g >= 650 && g <= 850 && b >= 500 && b <= 700) {
         Serial.println("pink detected");
