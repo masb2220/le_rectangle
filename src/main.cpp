@@ -1,28 +1,11 @@
-#include <Wire.h>
-#include "Adafruit_TCS34725.h"
-#include <IRremote.h>
-#include <LibRobus.h>
-//============ Variable Globale ==========//
-Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
-enum State {
-  reading,
-  pink,
-  blue,
-  cyan,
-  orange,
-  yellow
-};
-State state = reading;
-int threshold = 600;
-
-//============ Déclaration de Fonction ==========//
-void colorReaction();
-int position_robot(int threshold);
-int reception_signal();
+#include "declarations.h"
 
 void setup(void) {
   Serial.begin(9600);
-  
+  pinMode(gauche, INPUT);
+  pinMode(milieu, INPUT);
+  pinMode(droite, INPUT);
+  //BoardInit();
   pinMode(45, OUTPUT);
   pinMode(43, OUTPUT);
   pinMode(41, OUTPUT);
@@ -31,14 +14,16 @@ void setup(void) {
   pinMode(0, INPUT);
   pinMode(1, INPUT);
   pinMode(2, INPUT);
-  int pin_recepteur = 37;
-  IrReceiver.begin(pin_recepteur); // Initialise le IRsender de la librairie
+
+  irrecv.enableIRIn();   // initialise le récepteur IR
+
   if (tcs.begin()) {
     Serial.println("Found sensor");
   } else {
     Serial.println("No TCS34725 found ... check your connections");
     while (1);
   }
+
   digitalWrite(41, HIGH);
   digitalWrite(42, HIGH);
   digitalWrite(43, HIGH);
@@ -48,110 +33,4 @@ void setup(void) {
 
 void loop(void) {
   receiveIR();
-}
-
-void colorReaction(){
-switch(state){
-    case reading:
-    uint16_t r, g, b, c, colorTemp, lux;
-    tcs.getRawData(&r, &g, &b, &c);
-    colorTemp = tcs.calculateColorTemperature(r, g, b);
-    lux = tcs.calculateLux(r, g, b);
-      
-    Serial.print("Color Temp: "); Serial.print(colorTemp, DEC); Serial.print(" K - ");
-    Serial.print("Lux: "); Serial.print(lux, DEC); Serial.print(" - ");
-    Serial.print("R: "); Serial.print(r, DEC); Serial.print(" ");
-    Serial.print("G: "); Serial.print(g, DEC); Serial.print(" ");
-    Serial.print("B: "); Serial.print(b, DEC); Serial.print(" ");
-    Serial.print("C: "); Serial.print(c, DEC); Serial.print(" ");
-    Serial.println(" ");
-    if (r >= 800 && g >= 650 && g <= 950 && b >= 400 && b <= 800){
-      Serial.println("pink detected");
-      state = pink;
-    }
-    if (r >= 500 && r <= 800 && g >= 900 && b >= 600 && b <= 1000){
-      Serial.println("cyan detected");
-      state = cyan;
-    }
-    if (r >= 900 && r <= 1400 && g >= 900 && g <= 1400 && b >= 500 && b <= 800){
-      Serial.println("yellow detected");
-      state = yellow;
-    }
-    if (r >= 200 && r <= 600 && g >= 600 && g <=1100 && b >= 750){
-      Serial.println("blue detected");
-      state = blue;
-    }
-    if (r >= 200 && r <= 600 && g >= 600 && g <=1100 && b >= 750){
-      Serial.println("blue detected");
-      state = orange;
-    }
-    break;
-
-    case pink:
-    state = reading;
-    break;
-
-    case blue:
-    state = reading;
-    break;
-
-    case cyan:
-    state = reading;
-    break;
-
-    case orange:
-    state = reading;
-    break;
-
-    case yellow:
-    state = reading;
-    break;
-  }
-}
-
-int position_robot(int threshold){
-  int intensity_gauche = analogRead(0);
-  int intensity_milieu = analogRead(1);
-  int intensity_droite = analogRead(2);
-
-  if (intensity_milieu >= threshold){
-    return 0;
-  }
-  else if (intensity_droite >= threshold){
-    return 1;
-  }
-  else if (intensity_gauche >= threshold) {
-    return 2;
-  }
-
-}
-
-int reception_signal(){
-  if (IrReceiver.decode() & (IrReceiver.decodedIRData.address == 0x09)) {
- 
-    int data = IrReceiver.decodedIRData.command;
-    
-    if (data == 0x03){
-      return 1;
-    }
-    else if (data == 0x03){
-      return 2;
-    }
-    else {
-      return 37;
-    }
-  }
- 
-  else {
-    return 0;
-  }
-}
-
-void receiveIR() {
-  if (IrReceiver.decode()) {
-    if (IrReceiver.decodedIRData.address == 0x09) {
-      Serial.println(IrReceiver.decodedIRData.command);
-    }
-    IrReceiver.resume();  // ready the receiver for the next signal
-  }
 }
