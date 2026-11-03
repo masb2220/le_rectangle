@@ -39,7 +39,9 @@ extern decode_results results;
 
 //============ Déclaration de fonctions ==========//
 void colorReaction();
+void initLeds();
 int position_robot();
 void suivre_ligne();
 uint32_t receiveIR();
 void beep(int count);
+void updateLeds();

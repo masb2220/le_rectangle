@@ -139,6 +139,7 @@ void setup()
     Serial.println("No TCS34725 found ... check your connections");
     while (1);
   }
+  initLeds();  // initialisation des LEDs
     while (true) {
         uint32_t signal = receiveIR();
         if (signal == 0x906FC03FUL) {
@@ -150,6 +151,7 @@ void setup()
 
 void loop()
 {
+    updateLeds();
     colorReaction();
     updateBumpers();
     //lineUpdate();

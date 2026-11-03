@@ -3,7 +3,17 @@
 namespace {
 constexpr uint32_t BLUE_RESUME_SIGNAL = 0x906FC03FUL;
 }
+const int NB_LEDS = 5;
+const int LED_PINS[NB_LEDS] = {45, 44, 43, 42, 41};
+const unsigned long LED_DUREE = 10000;   // 10 s
+
+bool ledActive[NB_LEDS] = {false};
+unsigned long ledDebut[NB_LEDS] = {0};
+
 void bleu();
+void initLeds();
+void allumerLed(int i);
+void updateLeds();
 
 void colorReaction() {
   switch (state) {
@@ -45,14 +55,22 @@ void colorReaction() {
     }
 
     case blue:
+        allumerLed(4);  // allume la première LED
         bleu();
         state = reading;
         break;
 
     case pink:
+      allumerLed(0);  // allume la première LED
+      state = reading;
     case cyan:
+      allumerLed(3);  // allume la deuxième LED
+      state = reading;
     case orange:
+      allumerLed(1);  // allume la troisième LED
+      state = reading;
     case yellow:
+      allumerLed(2);  // allume la quatrième LED
       state = reading;
       break;
   }
@@ -68,6 +86,29 @@ void bleu() {
     if (signal == BLUE_RESUME_SIGNAL) {
       Serial.println("Resume signal received");
       return;
+    }
+  }
+}
+
+void initLeds() {            // à appeler dans setup()
+  for (int i = 0; i < NB_LEDS; i++) {
+    pinMode(LED_PINS[i], OUTPUT);
+    digitalWrite(LED_PINS[i], HIGH);   // éteinte
+  }
+}
+
+void allumerLed(int i) {
+  if (ledActive[i]) return;            // déjà allumée : on ne relance pas le chrono
+  digitalWrite(LED_PINS[i], LOW);      // allumée
+  ledActive[i] = true;
+  ledDebut[i] = millis();
+}
+
+void updateLeds() {                    // à appeler à chaque tour de loop()
+  for (int i = 0; i < NB_LEDS; i++) {
+    if (ledActive[i] && millis() - ledDebut[i] >= LED_DUREE) {
+      digitalWrite(LED_PINS[i], HIGH); // éteinte
+      ledActive[i] = false;
     }
   }
 }
