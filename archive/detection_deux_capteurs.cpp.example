@@ -1,0 +1,229 @@
+#include "cup.h"
+#include "distance_ir.h"
+#include "arm.h"
+#include "robot_control.h"
+#include "robot_serial.h"
+#include <math.h>
+#include <stdio.h>
+
+namespace {
+constexpr float PI_F = 3.14159265359f;
+constexpr float SCAN_SPEED = 0.20f;
+constexpr float DETECTION_MAX_CM = 50.0f; // Seuil IR pour la zone de recherche proche.
+// Garde d'association, pas une reconnaissance du verre. Pour 100 mm d'ecart
+// et une distance minimale exploitable de 100 mm : 2*atan(50/100) ~= 53 deg.
+// Marge de filtrage arrondie a 60 deg, a valider avec le montage reel.
+constexpr float PAIR_WINDOW_RAD = PI_F / 3.0f;
+constexpr float SENSOR_HALF_SPACING_CM = 5.0f;
+constexpr float FILTER_MARGIN_RAD = 3.0f * PI_F / 180.0f;
+constexpr unsigned long RAISE_MS = 2000;
+constexpr unsigned long TIMEOUT_MS = 70000;
+enum class State { IDLE, RAISE, SCAN, DETECTED, NOT_FOUND, FAILED };
+State state = State::IDLE;
+unsigned long phaseStart = 0;
+float previousTheta = 0;
+float swept = 0;
+struct Passage {
+    bool armed = true; // Faux si la cible etait deja visible avant le scan.
+    bool inside = false;
+    bool complete = false;
+    uint8_t hits = 0;
+    uint8_t misses = 0;
+    float entry = 0;
+    float exit = 0;
+    float sumCm = 0;
+    uint16_t count = 0;
+    unsigned long date = 0;
+};
+Passage passages[2];
+float wrap(float a) {
+    while (a > PI_F) a -= 2*PI_F;
+    while (a < -PI_F) a += 2*PI_F;
+    return a;
+}
+void reportPassage(uint8_t id, const char *event) {
+    const Passage &p = passages[id];
+    char message[110];
+    snprintf(message, sizeof(message), "IR %u %s : entree=%d sortie=%d deg, distance=%d mm", id, event,
+        int(p.entry*180/PI_F), int(p.exit*180/PI_F), p.count ? int(p.sumCm/p.count*10) : -1);
+    robot_serial_message(message);
+}
+void observe(uint8_t id) {
+    Passage &p = passages[id];
+    const DistanceIR d = lireDistance(id);
+    if (p.complete || !d.dateMs || d.dateMs == p.date) return;
+    p.date = d.dateMs;
+    const bool hit = d.valide && d.cm <= DETECTION_MAX_CM;
+    if (!p.armed) {
+        if (hit) p.misses = 0;
+        else if (++p.misses >= 3) {
+            p.armed = true;
+            p.misses = 0;
+            robot_serial_message(id == 0 ? "IR 0 degage : recherche d'une entree complete." : "IR 1 degage : recherche d'une entree complete.");
+        }
+        return;
+    }
+    if (hit) {
+        p.misses = 0;
+        if (!p.inside) {
+            if (!p.hits) {
+                p.entry = swept;
+                p.sumCm = 0;
+                p.count = 0;
+            }
+            p.sumCm += d.cm;
+            ++p.count;
+            if (++p.hits >= 2) {
+                p.inside = true;
+                char message[80];
+                snprintf(message, sizeof(message), "IR %u entree confirmee : angle=%d deg distance=%d mm", id,
+                    int(p.entry*180/PI_F), int(p.sumCm/p.count*10));
+                robot_serial_message(message);
+            }
+        } else {
+            p.sumCm += d.cm;
+            ++p.count;
+        }
+    } else {
+        p.hits = 0;
+        if (p.inside) {
+            if (!p.misses) p.exit = swept;
+            if (++p.misses >= 3) {
+                p.complete = true;
+                p.inside = false;
+                reportPassage(id, "passage termine");
+            }
+        }
+    }
+}
+}
+void cupBegin() { initDistance(); armBegin(); }
+bool cupStart() {
+    if (!robot_control_finished() || state == State::RAISE || state == State::SCAN) return false;
+    swept = 0;
+    passages[0] = Passage{};
+    passages[1] = Passage{};
+    flipUp();
+    state = State::RAISE;
+    phaseStart = millis();
+    robot_serial_message("Detection seule : relevage pour degager les IR.");
+    return true;
+}
+void cupAbort() {
+    robot_control_cancel();
+    state = State::IDLE;
+    robot_serial_message("Detection annulee, roues arretees.");
+}
+void cupUpdate() {
+    if (state != State::RAISE && state != State::SCAN) return;
+    if (robot_control_fault()) {
+        state = State::FAILED;
+        robot_serial_message("Defaut PID : detection interrompue.");
+        return;
+    }
+    float x, y, theta;
+    if (!robot_control_get_pose(x, y, theta)) {
+        robot_control_cancel();
+        state = State::FAILED;
+        robot_serial_message("Pose indisponible.");
+        return;
+    }
+    if (state == State::RAISE) {
+        if (millis() - phaseStart < RAISE_MS) return;
+        previousTheta = theta;
+        // Ignorer les mesures anterieures au depart du balayage.
+        for (uint8_t i = 0; i < 2; ++i) {
+            const DistanceIR d = lireDistance(i);
+            passages[i].date = d.dateMs;
+            passages[i].armed = !(d.valide && d.cm <= DETECTION_MAX_CM);
+            if (!passages[i].armed) robot_serial_message(i == 0
+                ? "IR 0 deja occupe : passage initial incomplet ignore."
+                : "IR 1 deja occupe : passage initial incomplet ignore.");
+        }
+        if (!robot_control_start_rotation(2*PI_F, SCAN_SPEED)) {
+            state = State::FAILED;
+            robot_serial_message("Balayage refuse.");
+            return;
+        }
+        state = State::SCAN;
+        phaseStart = millis();
+        robot_serial_message("Balayage continu : maximum 360 degres, seuil IR 50 cm.");
+        return;
+    }
+    swept += wrap(theta - previousTheta);
+    previousTheta = theta;
+    // Liberer un ancien passage : ne pas le garder jusqu'a l'autre bout du tour.
+    for (uint8_t i = 0; i < 2; ++i) {
+        if (passages[i].complete && swept - passages[i].exit > PAIR_WINDOW_RAD) {
+            char message[80];
+            snprintf(message, sizeof(message), "IR %u : ancien passage expire, recherche poursuivie.", i);
+            robot_serial_message(message);
+            const unsigned long date = passages[i].date;
+            passages[i] = Passage{};
+            passages[i].date = date;
+        }
+    }
+    observe(0);
+    observe(1);
+    if (passages[0].complete && passages[1].complete) {
+        const float center0 = (passages[0].entry + passages[0].exit) * 0.5f;
+        const float center1 = (passages[1].entry + passages[1].exit) * 0.5f;
+        // Proximite dans ce balayage, sans associer deux secteurs lointains.
+        const float gap = fabsf(center0 - center1);
+        const float d0 = passages[0].sumCm / passages[0].count;
+        const float d1 = passages[1].sumCm / passages[1].count;
+        // Borne conservative pour deux axes arriere symetriques. Le decalage
+        // longitudinal inconnu reduit l'ecart geometrique, il n'est pas invente.
+        const float geometricGap = atanf(SENSOR_HALF_SPACING_CM/d0) + atanf(SENSOR_HALF_SPACING_CM/d1);
+        const float widthMargin = ((passages[0].exit-passages[0].entry) +
+                                   (passages[1].exit-passages[1].entry)) * 0.5f;
+        const float allowedGap = fminf(PAIR_WINDOW_RAD, geometricGap + widthMargin + FILTER_MARGIN_RAD);
+        char pairing[100];
+        snprintf(pairing, sizeof(pairing), "Association : ecart=%d deg, maximum=%d deg, distances=%d/%d mm",
+            int(gap*180/PI_F), int(allowedGap*180/PI_F), int(d0*10), int(d1*10));
+        robot_serial_message(pairing);
+        if (gap > allowedGap) {
+            char message[90];
+            snprintf(message, sizeof(message), "Paire rejetee : ecart=%d deg trop grand. Balayage poursuivi.", int(gap*180/PI_F));
+            robot_serial_message(message);
+            const uint8_t oldest = center0 < center1 ? 0 : 1;
+            const unsigned long date = passages[oldest].date;
+            passages[oldest] = Passage{};
+            passages[oldest].date = date;
+            // Continuer aussi la verification de fin de tour ci-dessous.
+        } else {
+            robot_control_cancel();
+            state = State::DETECTED;
+            robot_serial_message("Deux passages proches detectes. Roues arretees.");
+            char result[100];
+            snprintf(result, sizeof(result), "Candidat : direction de scan=%d deg, distance moyenne=%d mm",
+                int((center0+center1)*0.5f*180/PI_F), int((d0+d1)*5));
+            robot_serial_message(result);
+            robot_serial_message("Direction estimee, pas de centrage ni de ramassage.");
+            return;
+        }
+    }
+    if (robot_control_finished()) {
+        state = State::NOT_FOUND;
+        robot_serial_message("360 degres termines sans paire de passages proches.");
+    } else if (millis() - phaseStart > TIMEOUT_MS) {
+        robot_control_cancel();
+        state = State::FAILED;
+        robot_serial_message("Delai de balayage depasse.");
+    }
+}
+void cupPrintStatus() {
+    char message[120];
+    snprintf(message, sizeof(message), "Detection etat=%u (0=repos 1=releve 2=scan 3=detecte 4=absent 5=defaut)", unsigned(state));
+    robot_serial_message(message);
+    snprintf(message, sizeof(message), "Temps=%lu s PID defaut=%u cause=%u retard=%lu us balayage=%d deg",
+        millis()/1000UL, unsigned(robot_control_fault()), unsigned(robot_control_fault_reason()),
+        robot_control_fault_interval_us(), int(swept*180/PI_F));
+    robot_serial_message(message);
+    for (uint8_t i=0; i<2; ++i) {
+        const DistanceIR d = lireDistance(i);
+        snprintf(message, sizeof(message), "IR %u brut=%u distance=%d mm valide=%u age=%lu ms passage=%u", i,
+            d.brut, d.valide ? int(d.cm*10) : -1, unsigned(d.valide), millis()-d.dateMs, unsigned(passages[i].complete));
+        robot_serial_message(message);
+    }
+}

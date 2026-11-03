@@ -12,7 +12,7 @@ void Robus::init(){
     pinMode(BUMPER_PIN[i], INPUT);
   }
   for(uint8_t id = 0; id < 2; id++){
-    enableServo(id);
+    // Les servos du bras seront actives uniquement sur commande explicite.
     __sonar__[id].init(__SONAR_ECHO_PINS__[id], __SONAR_TRIG_PINS__[id]);
   }
 }
