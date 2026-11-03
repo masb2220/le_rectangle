@@ -1,11 +1,16 @@
 #include "declarations.h"
 
-int receiveIR() {
-  if (irrecv.decode(&results)) {
-    if (results.value != 0xFFFFFFFF) {      // ignore les trames de répétition
-      Serial.println(results.value, HEX);   // une seule fois par appui
-    }
-    irrecv.resume();                        // prêt pour le prochain signal
+uint32_t receiveIR() {
+  if (!irrecv.decode(&results)) {
+    return 0;
   }
-  return results.value;
+
+  const uint32_t signal = results.value;
+  irrecv.resume();
+  if (signal == 0xFFFFFFFFUL) {
+    return 0;
+  }
+
+  Serial.println(signal, HEX);
+  return signal;
 }

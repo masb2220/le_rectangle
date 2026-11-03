@@ -1,5 +1,10 @@
 #include "declarations.h"
 
+namespace {
+constexpr uint32_t BLUE_RESUME_SIGNAL = 0x906FC03FUL;
+}
+void bleu();
+
 void colorReaction() {
   switch (state) {
     case reading: {
@@ -16,31 +21,35 @@ void colorReaction() {
       Serial.print("C: "); Serial.print(c, DEC); Serial.print(" ");
       Serial.println(" ");
 
-      if (r >= 800 && g >= 650 && g <= 950 && b >= 400 && b <= 800) {
+      if (r >= 800 && g >= 650 && g <= 850 && b >= 500 && b <= 700) {
         Serial.println("pink detected");
         state = pink;
       }
-      if (r >= 500 && r <= 800 && g >= 900 && b >= 600 && b <= 1000) {
+      if (r >= 475 && r <= 550 && g >= 675 && b >= 575 && b <= 700) {
         Serial.println("cyan detected");
         state = cyan;
       }
-      if (r >= 900 && r <= 1400 && g >= 900 && g <= 1400 && b >= 500 && b <= 800) {
+      if (r >= 725 && r <= 850 && g >= 850 && g <= 1000 && b >= 425 && b <= 550) {
         Serial.println("yellow detected");
         state = yellow;
       }
-      if (r >= 200 && r <= 600 && g >= 600 && g <= 1100 && b >= 750) {
+      if (r >= 250 && r <= 400 && g >= 500 && g <= 700 && b >= 500 && b <= 700) {
         Serial.println("blue detected");
         state = blue;
       }
-      if (r >= 200 && r <= 600 && g >= 600 && g <= 1100 && b >= 750) {
+      if (r >= 650 && r <= 775 && g >= 550 && g <= 675 && b >= 300 && b <= 450) {
         Serial.println("orange detected");   // TODO: orange needs its own RGB ranges
         state = orange;
       }
       break;
     }
 
-    case pink:
     case blue:
+        bleu();
+        state = reading;
+        break;
+
+    case pink:
     case cyan:
     case orange:
     case yellow:
@@ -49,17 +58,16 @@ void colorReaction() {
   }
 }
 
-void bleu(){ //Quand le case bleu est appellé, la fonction bleu() doit être appelée, elle s'éxécute et vérifies le signal reçu, losrsqu'il s'agit du bon, la fonction se brise et le case continues, le code dans le case doit inclure le retour à l'état "normal" de suivre la ligne
+void bleu() {
   MOTOR_SetSpeed(LEFT, 0);
-  MOTOR_SetSpeed(RIGHT, 0); //arrete le robot
- 
-  
-  int i = 0;
-  while (i<1){
-    int signal = receiveIR(); //On store dans signal la valeur de retour de la fonction reception signal
-    if (signal == 1){ //Cherche le signal 1, s'il est trouvé, on sort de la boucle et ensuite de la fonction
+  MOTOR_SetSpeed(RIGHT, 0);            // stop robot
+  Serial.println("Blue: waiting for IR...");
+
+  while (true) {                        
+    int signal = receiveIR();
+    if (signal == BLUE_RESUME_SIGNAL) {
+      Serial.println("Resume signal received");
       return;
     }
   }
-  
 }

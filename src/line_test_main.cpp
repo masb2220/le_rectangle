@@ -5,7 +5,7 @@
 #include <string.h>
 #include "LineFollower/line_follower.h"
 #include "LineFollower/line_steering.h"
-
+#include "declarations.h"
 namespace {
 char output[384];
 uint16_t head = 0, tail = 0, used = 0;
@@ -131,16 +131,33 @@ void setup()
     message("LINE TEST : analogiques A10=gauche A11=milieu A12=droite, 9600 bauds.");
     message("Calibration chargee. Placer la ligne puis appuyer sur un bumper (ou GO).");
     message("STOP arrete. Aucun depart automatique. Servos desactives.");
+    irrecv.enableIRIn();   // initialise le récepteur IR
+
+  if (tcs.begin()) {
+    Serial.println("Found sensor");
+  } else {
+    Serial.println("No TCS34725 found ... check your connections");
+    while (1);
+  }
+    while (true) {
+        uint32_t signal = receiveIR();
+        if (signal == 0x906FC03FUL) {
+        Serial.println("start signal received");
+        break;
+        }
+    }
 }
 
 void loop()
 {
+    colorReaction();
     updateBumpers();
-    lineUpdate();
+    //lineUpdate();
     serialUpdate();
     if (const char *event = lineEvent()) message(event);
     if (live && millis() - lastStatus >= 500UL && used < 100) {
         lastStatus = millis();
         printStatus();
     }
+
 }
