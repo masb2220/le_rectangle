@@ -29,7 +29,7 @@ bool robot_control_init();
  * Avance l echeance d une periode fixe : ce code ne mesure pas le dt reel pour les calcul.
  * Ce n est pas une interruption; la frequence des appels depend aussi du reste de loop.
  */
-void robot_control_update();
+void robot_control_update(bool driveMotors = true);
 
 /**
  * @brief Demander un mouvement vers une cible absolue si le controle est disponible.

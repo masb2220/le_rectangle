@@ -1,5 +1,14 @@
 #include "declarations.h"
 
+namespace {
+constexpr int gauche = 10;
+constexpr int milieu = 11;
+constexpr int droite = 12;
+constexpr int threshold_gauche = 40;
+constexpr int threshold_milieu = 80;
+constexpr int threshold_droite = 30;
+}
+
 int position_robot() {
   int intensity_gauche = analogRead(gauche);
   int intensity_milieu = analogRead(milieu);

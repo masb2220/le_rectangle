@@ -411,7 +411,7 @@ static bool apply_motor_commands() {
  * Si une etape echoue, memorise un defaut global et demande l arret.
  * Cette fonction fait un seul scan; la cadence est gerer par robot_control_update.
  */
-static void control_cycle() {
+static void control_cycle(bool driveMotors) {
     int32_t left_delta_count = 0; // Variation gauche
     int32_t right_delta_count = 0; // Variation droite
 
@@ -430,7 +430,7 @@ static void control_cycle() {
         left_delta_count, right_delta_count, robot.x, robot.y, robot.theta,
         left_wheel.speed_per_count * CONTROL_PERIOD_S, WHEEL_SPACING_M, 0.0f, 0.0f);
 #endif
-    if (!apply_motor_commands()) {
+    if (driveMotors && !apply_motor_commands()) {
         set_system_fault(ControlFault::MOTOR_COMMAND); // Defaut de commande
     }
 }
@@ -483,7 +483,7 @@ bool robot_control_init() {
  * Avance l echeance d une periode fixe : ce code ne mesure pas le dt reel pour les calcul.
  * Ce n est pas une interruption; la frequence des appels depend aussi du reste de loop.
  */
-void robot_control_update() {
+void robot_control_update(bool driveMotors) {
     if (!control_initialized || system_fault || !HARDWARE_CONNECTED) {
         return; // Aucun cycle sans initialisation valide
     }
@@ -503,7 +503,7 @@ void robot_control_update() {
     }
 
     last_control_time += CONTROL_PERIOD_US; // Maintenir la cadence
-    control_cycle(); // Executer acquisition, calculs et commandes
+    control_cycle(driveMotors); // Executer acquisition, calculs et commandes
     if (motion.state == MotionState::FINISHED) restore_motion_overrides();
 }
 

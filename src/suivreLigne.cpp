@@ -1,5 +1,13 @@
 #include "declarations.h"
 
+namespace {
+constexpr float vitesse = 0.2f;
+constexpr float correction = 0.01f;
+float vitesse_gauche = vitesse;
+float vitesse_droite = vitesse;
+int last_position = 0;
+}
+
 void suivre_ligne() {
   int position = position_robot();
 

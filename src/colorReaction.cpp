@@ -1,113 +1,119 @@
 #include "declarations.h"
 
+State state = reading;
+
 namespace {
-constexpr uint32_t BLUE_RESUME_SIGNAL = 0x906FC03FUL;
-}
-const int NB_LEDS = 5;
-const int LED_PINS[NB_LEDS] = {45, 44, 43, 42, 41};
-const unsigned long LED_DUREE = 10000;   // 10 s
+constexpr unsigned long LED_MS = 10000;
+constexpr uint8_t LED_PINS[] = {45, 44, 43, 42, 41};
+bool ledActive[5] = {};
+unsigned long ledSince[5] = {};
+unsigned long lastSample = 0;
+bool sensorReady = false;
 
-bool ledActive[NB_LEDS] = {false};
-unsigned long ledDebut[NB_LEDS] = {0};
+constexpr uint8_t COLOR_ERROR_PERCENT = 10;
+static_assert(COLOR_ERROR_PERCENT <= 100, "Pourcentage hors plage");
 
-void bleu();
-void initLeds();
-void allumerLed(int i);
-void updateLeds();
+struct ChannelRange {
+  uint16_t minValue;
+  uint16_t maxValue;
 
-void colorReaction() {
-  switch (state) {
-    case reading: {
-      uint16_t r, g, b, c, colorTemp, lux;
-      tcs.getRawData(&r, &g, &b, &c);
-      colorTemp = tcs.calculateColorTemperature(r, g, b);
-      lux = tcs.calculateLux(r, g, b);
-
-      /* Serial.print("Color Temp: "); Serial.print(colorTemp, DEC); Serial.print(" K - ");
-      Serial.print("Lux: "); Serial.print(lux, DEC); Serial.print(" - ");
-      Serial.print("R: "); Serial.print(r, DEC); Serial.print(" ");
-      Serial.print("G: "); Serial.print(g, DEC); Serial.print(" ");
-      Serial.print("B: "); Serial.print(b, DEC); Serial.print(" ");
-      Serial.print("C: "); Serial.print(c, DEC); Serial.print(" ");
-      Serial.println(" "); */
-
-      if (r >= 800 && g >= 650 && g <= 850 && b >= 500 && b <= 700) {
-        Serial.println("pink detected");
-        state = pink;
-      }
-      if (r >= 475 && r <= 550 && g >= 675 && b >= 575 && b <= 700) {
-        Serial.println("cyan detected");
-        state = cyan;
-      }
-      if (r >= 725 && r <= 850 && g >= 850 && g <= 1000 && b >= 425 && b <= 550) {
-        Serial.println("yellow detected");
-        state = yellow;
-      }
-      if (r >= 250 && r <= 400 && g >= 500 && g <= 700 && b >= 500 && b <= 700) {
-        Serial.println("blue detected");
-        state = blue;
-      }
-      if (r >= 650 && r <= 775 && g >= 550 && g <= 675 && b >= 300 && b <= 450) {
-        Serial.println("orange detected");   // TODO: orange needs its own RGB ranges
-        state = orange;
-      }
-      break;
-    }
-
-    case blue:
-        allumerLed(4);  // allume la première LED
-        bleu();
-        state = reading;
-        break;
-
-    case pink:
-      allumerLed(0);  // allume la première LED
-      state = reading;
-    case cyan:
-      allumerLed(3);  // allume la deuxième LED
-      state = reading;
-    case orange:
-      allumerLed(1);  // allume la troisième LED
-      state = reading;
-    case yellow:
-      allumerLed(2);  // allume la quatrième LED
-      state = reading;
-      break;
+  bool contains(uint16_t value) const {
+    const uint32_t lower = uint32_t(minValue) * (100 - COLOR_ERROR_PERCENT) / 100;
+    const uint32_t upper = (uint32_t(maxValue) * (100 + COLOR_ERROR_PERCENT) + 99) / 100;
+    return value >= lower && value <= upper;
   }
-}
+};
 
-void bleu() {
-  MOTOR_SetSpeed(LEFT, 0);
-  MOTOR_SetSpeed(RIGHT, 0);            // stop robot
-  Serial.println("Blue: waiting for IR...");
+struct ColorRange {
+  State color;
+  ChannelRange red;
+  ChannelRange green;
+  ChannelRange blue;
+};
 
-  while (true) {                        
-    int signal = receiveIR();
-    if (signal == BLUE_RESUME_SIGNAL) {
-      Serial.println("Resume signal received");
-      return;
+// Bornes RVB mesurees. La marge est appliquee par contains().
+// Pour l'orange, la seconde capture est la reference.
+constexpr ColorRange COLOR_RANGES[] = {
+  {pink,   {960, 985}, {717, 732}, {628, 641}},
+  {cyan,   {609, 610}, {906, 907}, {738, 739}},
+  {yellow, {848, 848}, {974, 975}, {528, 528}},
+  {orange, {836, 838}, {711, 712}, {445, 446}},
+  {blue,   {357, 361}, {657, 664}, {658, 664}},
+};
+
+State classify(uint16_t r, uint16_t g, uint16_t b) {
+  for (const ColorRange &range : COLOR_RANGES) {
+    if (range.red.contains(r) && range.green.contains(g) && range.blue.contains(b)) {
+      return range.color;
     }
   }
+  return reading;
+}
 }
 
-void initLeds() {            // à appeler dans setup()
-  for (int i = 0; i < NB_LEDS; i++) {
-    pinMode(LED_PINS[i], OUTPUT);
-    digitalWrite(LED_PINS[i], HIGH);   // éteinte
+bool initColorSensor() {
+  initLeds();
+  sensorReady = tcs.begin();
+  lastSample = millis();
+  return sensorReady;
+}
+
+void colorReaction(bool diagnostics) {
+  const unsigned long now = millis();
+  if (!sensorReady || now - lastSample < COLOR_SAMPLE_MS) return;
+  lastSample = now;
+
+  // Le capteur integre en continu. Lire ses registres sans le delay de getRawData().
+  const uint16_t r = tcs.read16(TCS34725_RDATAL);
+  const uint16_t g = tcs.read16(TCS34725_GDATAL);
+  const uint16_t b = tcs.read16(TCS34725_BDATAL);
+  const State detected = classify(r, g, b);
+  if (diagnostics) {
+    static const char *const names[] = {"inconnue", "rose", "bleu", "turquoise", "orange", "jaune"};
+    Serial.print(F("R=")); Serial.print(r);
+    Serial.print(F(" V=")); Serial.print(g);
+    Serial.print(F(" B=")); Serial.print(b);
+    Serial.print(F(" couleur=")); Serial.println(names[detected]);
+  }
+  if (detected == state) return;
+  state = detected;
+
+  uint8_t led;
+  switch (detected) {
+    case pink: led = 0; break;
+    case orange: led = 1; break;
+    case yellow: led = 2; break;
+    case cyan: led = 3; break;
+    case blue: led = 4; break;
+    default: return;
+  }
+  digitalWrite(LED_PINS[led], LOW);
+  ledActive[led] = true;
+  ledSince[led] = now;
+}
+
+bool colorBlueHold() {
+  static bool waiting = false;
+  static bool sawBlue = false;
+  const bool blueNow = state == blue;
+  if (blueNow && !sawBlue) waiting = true;
+  sawBlue = blueNow;
+  if (waiting && receiveIR() == IR_WAKE_SIGNAL) waiting = false;
+  return waiting;
+}
+
+void initLeds() {
+  for (uint8_t pin : LED_PINS) {
+    digitalWrite(pin, HIGH);
+    pinMode(pin, OUTPUT);
   }
 }
 
-void allumerLed(int i) {
-  if (ledActive[i]) return;            // déjà allumée : on ne relance pas le chrono
-  digitalWrite(LED_PINS[i], LOW);      // allumée
-  ledActive[i] = true;
-  ledDebut[i] = millis();
-}
-
-void updateLeds() {                    // à appeler à chaque tour de loop()
-  for (int i = 0; i < NB_LEDS; i++) {
-    if (ledActive[i] && millis() - ledDebut[i] >= LED_DUREE) {
-      digitalWrite(LED_PINS[i], HIGH); // éteinte
+void updateLeds() {
+  const unsigned long now = millis();
+  for (uint8_t i = 0; i < 5; ++i) {
+    if (ledActive[i] && now - ledSince[i] >= LED_MS) {
+      digitalWrite(LED_PINS[i], HIGH);
       ledActive[i] = false;
     }
   }

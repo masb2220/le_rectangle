@@ -298,3 +298,11 @@ const char *lineMode()
         default: return "ARRET";
     }
 }
+
+void lineReadCalibration(uint16_t white[3], uint16_t black[3])
+{
+    for (uint8_t i = 0; i < 3; ++i) {
+        white[i] = whiteValues[i];
+        black[i] = blackValues[i];
+    }
+}

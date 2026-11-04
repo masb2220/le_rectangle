@@ -15,33 +15,26 @@ enum State {
   yellow
 };
 
-//============ Variables globales (définies dans globals.cpp) ==========//
+constexpr unsigned long COLOR_SAMPLE_MS = 160UL;
 extern Adafruit_TCS34725 tcs;
 extern State state;
 
-extern int threshold;
-extern int threshold_gauche;
-extern int threshold_milieu;
-extern int threshold_droite;
 
-extern int gauche;
-extern int milieu;
-extern int droite;
 
-extern float vitesse;
-extern float vitesse_gauche;
-extern float vitesse_droite;
-extern float correction;
-extern int last_position;
 
 extern IRrecv irrecv;
-extern decode_results results;
 
 //============ Déclaration de fonctions ==========//
-void colorReaction();
+void colorReaction(bool diagnostics = false);
 void initLeds();
 int position_robot();
 void suivre_ligne();
+// Trames mesurees avec la telecommande et IRremote 2.x : depart et reveil.
+constexpr uint32_t IR_START_SIGNAL = 0x906FC03FUL;
+constexpr uint32_t IR_WAKE_SIGNAL = 0x906F08F7UL;
 uint32_t receiveIR();
 void beep(int count);
+bool updateBeep();
 void updateLeds();
+bool initColorSensor();
+bool colorBlueHold();

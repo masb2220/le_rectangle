@@ -133,16 +133,10 @@ void setup()
     message("STOP arrete. Aucun depart automatique. Servos desactives.");
     irrecv.enableIRIn();   // initialise le récepteur IR
 
-  if (tcs.begin()) {
-    Serial.println("Found sensor");
-  } else {
-    Serial.println("No TCS34725 found ... check your connections");
-    while (1);
-  }
-  initLeds();  // initialisation des LEDs
+    if (!initColorSensor()) message("Capteur couleur TCS34725 introuvable.");
     while (true) {
         uint32_t signal = receiveIR();
-        if (signal == 0x906FC03FUL) {
+        if (signal == IR_START_SIGNAL) {
         Serial.println("start signal received");
         break;
         }

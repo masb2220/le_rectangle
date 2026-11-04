@@ -126,6 +126,12 @@ bool goToOffset(float degrees) {
     return true;
 }
 }
+int cupResult() {
+    if (state == State::DONE) return 1;
+    if (state == State::FAILED || state == State::NOT_FOUND) return -1;
+    return 0;
+}
+
 void cupBegin() {
     initDistance();
 }
@@ -263,7 +269,7 @@ void cupUpdate() {
         if (fabsf(delta) < 0.001f) {
             state = State::DONE;
             robot_serial_message("Sequence terminee : distance et orientation retablies (odometrie).");
-        } else if (!robot_control_start_rotation(delta, OFFSET_SPEED_RAD_S)) {
+        } else if (!robot_control_start_rotation(delta, RETURN_HEADING_SPEED_RAD_S)) {
             fail("Retour a l'orientation initiale refuse.");
         } else state = State::RESTORING_HEADING;
     } else if (state == State::RESTORING_HEADING && robot_control_finished()) {

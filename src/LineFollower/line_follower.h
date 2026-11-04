@@ -3,10 +3,10 @@
 
 constexpr uint8_t LINE_PINS[3] = {A10, A11, A12}; // Gauche, milieu, droite.
 // Valeurs approchees relevees dans les mesures de l'utilisateur (G/M/D).
-constexpr uint16_t LINE_WHITE_DEFAULT[3] = {28, 28, 26};
-constexpr uint16_t LINE_BLACK_DEFAULT[3] = {398, 519, 524};
+constexpr uint16_t LINE_WHITE_DEFAULT[3] = {46, 32, 30};
+constexpr uint16_t LINE_BLACK_DEFAULT[3] = {443, 500, 451};
 
-constexpr float LINE_BASE_SPEED = 0.4f;
+constexpr float LINE_BASE_SPEED = 0.55f;
 constexpr float LINE_KP = 0.14f;
 constexpr float LINE_KI = 0.005f;
 constexpr float LINE_KD = 0.005f;
@@ -45,3 +45,4 @@ void lineReadStatus(uint16_t raw[3], uint16_t darkness[3]);
 
 
 const char *lineMode();
+void lineReadCalibration(uint16_t white[3], uint16_t black[3]);

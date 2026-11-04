@@ -20,3 +20,4 @@ void robot_serial_update(bool allow_move = true);
 void robot_serial_message(const char *message);
 
 #endif
+void robot_serial_flush();

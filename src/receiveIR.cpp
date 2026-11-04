@@ -1,6 +1,9 @@
 #include "declarations.h"
 
+IRrecv irrecv(37);
+
 uint32_t receiveIR() {
+  decode_results results;
   if (!irrecv.decode(&results)) {
     return 0;
   }

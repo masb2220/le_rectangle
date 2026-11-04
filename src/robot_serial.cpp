@@ -57,6 +57,9 @@ void robot_serial_update(bool) {
         lastLive=millis();
         cupPrintStatus();
     }
+    robot_serial_flush();
+}
+void robot_serial_flush() {
     int available=Serial.availableForWrite();
     if(available>16) available=16;
     while(available-- > 0 && used) {
