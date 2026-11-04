@@ -13,6 +13,7 @@ constexpr float PI_F = 3.14159265359f;
 enum class State { IDLE, LOWER_BEFORE_SCAN, SCANNING, SETTLING, ROTATING_OFFSET,
     TUNING, NOT_FOUND, FAILED, REVERSING, REVERSE_SETTLE, CLOSING, LIFTING, DONE, INITIAL_CHECK, ESCAPE_SETTLE, ESCAPE_RIGHT, RESTART_SETTLE, RETURNING, RETURN_SETTLE, RESTORING_HEADING };
 State state = State::IDLE;
+bool pinModeActive = false;
 unsigned long phaseStart = 0;
 unsigned long sampleDate = 0;
 float referenceTheta = 0;
@@ -96,6 +97,18 @@ bool startLeftScan() {
     return true;
 }
 bool finishOffset() {
+    if (pinModeActive) {
+        const float approach = wrap(referenceTheta + requestedOffsetDeg*PI_F/180.0f - initialTheta);
+        const bool right = sinf(approach) > 0.001f;
+        pickupDisplacementM = -(detectionCm/100.0f + PIN_CONTACT_ADJUST_M);
+        if (pickupDisplacementM >= 0 ||
+            !robot_control_start_straight(pickupDisplacementM,
+                right ? PIN_RIGHT_SPEED_M_S : PIN_LEFT_SPEED_M_S)) return false;
+        state = State::REVERSING;
+        robot_serial_message(right ? "Quille a droite : recul rapide." :
+                                     "Quille a gauche ou au centre : recul lent.");
+        return true;
+    }
     if (!pickupAfter) {
         state = State::TUNING;
         robot_serial_message("Reglage pret : + = 1 deg gauche, - = 1 deg droite.");
@@ -135,17 +148,23 @@ int cupResult() {
 void cupBegin() {
     initDistance();
 }
-bool cupStart(bool pickupAfterScan) {
+static bool startScan(bool pickupAfterScan, bool forPin) {
     const bool available = state == State::IDLE || state == State::TUNING ||
         state == State::NOT_FOUND || state == State::FAILED || state == State::DONE;
     if (!available || !robot_control_finished()) return false;
     if (!thetaNow(initialTheta)) return false;
+    pinModeActive = forPin;
     pickupDisplacementM = 0;
     scanRestarts = 0;
     pickupAfter = pickupAfterScan;
-    requestedOffsetDeg = SCAN_OFFSET_DEG;
+    requestedOffsetDeg = forPin ? PIN_OFFSET_DEG : SCAN_OFFSET_DEG;
     detectionCm = NAN;
     // Reouvrir pour permettre un nouveau cycle apres une prise precedente.
+    if (forPin) {
+        initialCheck();
+        robot_serial_message("Rose : recherche de la quille avec A0.");
+        return true;
+    }
     if (pickupAfter) openThumb();
     flipDown();
     state = State::LOWER_BEFORE_SCAN;
@@ -155,6 +174,14 @@ bool cupStart(bool pickupAfterScan) {
         : "TUNE : descente puis scan gauche, sans ramassage.");
     return true;
 }
+bool cupStart(bool pickupAfterScan) {
+    return startScan(pickupAfterScan, false);
+}
+
+bool pinStart() {
+    return startScan(false, true);
+}
+
 void cupAbort() {
     robot_control_cancel();
     state = State::IDLE;
@@ -237,8 +264,8 @@ void cupUpdate() {
     } else if (state == State::REVERSING && robot_control_finished()) {
         state = State::REVERSE_SETTLE;
         phaseStart = millis();
-        robot_serial_message("Recul termine, roues arretees.");
-    } else if (state == State::REVERSE_SETTLE && millis() - phaseStart >= MOTION_SETTLE_MS) {
+        robot_serial_message(pinModeActive ? "Approche quille terminee." : "Recul termine, roues arretees.");
+    } else if (state == State::REVERSE_SETTLE && !pinModeActive && millis() - phaseStart >= MOTION_SETTLE_MS) {
         closeThumb();
         state = State::CLOSING;
         phaseStart = millis();
@@ -248,15 +275,16 @@ void cupUpdate() {
         state = State::LIFTING;
         phaseStart = millis();
         robot_serial_message("Flip : relevage de la pince.");
-    } else if (state == State::LIFTING && millis() - phaseStart >= ARM_MOVE_WAIT_MS) {
+    } else if ((state == State::LIFTING && millis() - phaseStart >= ARM_MOVE_WAIT_MS) ||
+               (state == State::REVERSE_SETTLE && pinModeActive && millis() - phaseStart >= MOTION_SETTLE_MS)) {
         const float distance = cupReturnDistance(pickupDisplacementM);
-        if (!isfinite(distance) || distance <= 0 ||
-            !robot_control_start_straight(distance, PICKUP_STRAIGHT_SPEED_M_S)) {
+        if (!isfinite(distance) || distance == 0 ||
+            !robot_control_start_straight(distance, pinModeActive ? PIN_RETURN_SPEED_M_S : PICKUP_STRAIGHT_SPEED_M_S)) {
             fail("Retour en ligne droite refuse."); return;
         }
         state = State::RETURNING;
         char message[90];
-        snprintf(message, sizeof(message), "Gobelet releve : retour de %d mm en sens inverse.", int(distance*1000));
+        snprintf(message, sizeof(message), "Retour de %d mm en sens inverse.", int(fabsf(distance)*1000));
         robot_serial_message(message);
     } else if (state == State::RETURNING && robot_control_finished()) {
         state = State::RETURN_SETTLE;

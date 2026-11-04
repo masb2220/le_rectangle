@@ -4,6 +4,7 @@
 #include "wall_detour.h"
 #include "cup.h"
 #include "arm.h"
+#include "scan_config.h"
 #include "distance_ir.h"
 #include "LineFollower/line_follower.h"
 
@@ -39,8 +40,37 @@ unsigned long stoppedAt = 0;
 bool colorReady = false;
 constexpr unsigned long COLOR_COOLDOWN_MS = 2000UL;
 bool pickupRunning = false;
+State objectChallenge = reading;
+uint8_t completedChallenges = 0;
+bool courseFinished = false;
+constexpr bool LAUNCH_CUP_AT_FINISH = true;
+constexpr unsigned long LAUNCH_OPEN_DELAY_MS = 100UL;
+constexpr unsigned long LAUNCH_LIFT_DELAY_MS = 250UL;
+enum class ReleasePhase { Descending, WaitingToLift, Done };
+ReleasePhase releasePhase = ReleasePhase::Done;
+unsigned long releaseStartedAt = 0;
+
+constexpr uint8_t challengeBit(State color) {
+    return 1U << color;
+}
+constexpr uint8_t ALL_CHALLENGES = challengeBit(pink) | challengeBit(blue) |
+    challengeBit(cyan) | challengeBit(orange) | challengeBit(yellow);
+
+void completeChallenge(State color) {
+    completedChallenges |= challengeBit(color);
+    if (completedChallenges != ALL_CHALLENGES) return;
+
+    lineStop();
+    robot_control_cancel();
+    courseFinished = true;
+    flipDown();
+    releaseStartedAt = millis();
+    releasePhase = ReleasePhase::Descending;
+    robot_serial_message("Cinq epreuves terminees. Descente pour deposer le verre.");
+}
 bool colorCooldown = false;
 bool ignoreOrangeUntilClear = false;
+bool ignorePinkUntilClear = false;
 unsigned long pickupFinishedAt = 0;
 
 void readLineDarkness(uint16_t darkness[3]) {
@@ -176,6 +206,8 @@ void updateGap() {
                         if (!lineStart()) break;
                         ignoreGreenUntilClear = true;
                         gapPhase = GapPhase::Idle;
+                        completeChallenge(cyan);
+                        if (courseFinished) return;
                         robot_serial_message("Ligne de sortie confirmee. Reprise du PID.");
                         return;
                     }
@@ -216,7 +248,10 @@ void setup() {
     } else {
         robot_serial_message("TCS34725 introuvable. Verifier le branchement et redemarrer.");
     }
-    robot_control_init();
+    if (robot_control_init()) {
+        flipDown();
+        closeThumb();
+    }
     lineBegin();
     wallDetourInit();
     cupBegin();
@@ -226,6 +261,21 @@ void loop() {
     robot_control_update(!lineFollowing());
     robot_serial_flush();
     updateLeds();
+    if (courseFinished) {
+        const unsigned long elapsed = millis() - releaseStartedAt;
+        if (releasePhase == ReleasePhase::Descending &&
+            elapsed >= (LAUNCH_CUP_AT_FINISH ? LAUNCH_OPEN_DELAY_MS : ARM_MOVE_WAIT_MS)) {
+            openThumb();
+            releaseStartedAt = millis();
+            releasePhase = LAUNCH_CUP_AT_FINISH ? ReleasePhase::WaitingToLift : ReleasePhase::Done;
+            if (!LAUNCH_CUP_AT_FINISH) robot_serial_message("Verre depose. Parcours termine.");
+        } else if (releasePhase == ReleasePhase::WaitingToLift && elapsed >= LAUNCH_LIFT_DELAY_MS) {
+            flipUp();
+            releasePhase = ReleasePhase::Done;
+            robot_serial_message("Lancer commande. Parcours termine.");
+        }
+        return;
+    }
     if (robot_control_fault()) {
         if (lineFollowing()) lineStop();
         return;
@@ -239,10 +289,12 @@ void loop() {
         if (result == 0) return;
         pickupRunning = false;
         if (result > 0 && lineStart()) {
+            completeChallenge(objectChallenge);
+            if (courseFinished) return;
             state = reading;
             colorCooldown = true;
             pickupFinishedAt = millis();
-            robot_serial_message("Ramassage termine. Reprise du suivi de ligne.");
+            robot_serial_message("Manoeuvre terminee. Reprise du suivi de ligne.");
         } else {
             robot_serial_message("Ramassage ou reprise impossible. Robot arrete.");
         }
@@ -254,6 +306,7 @@ void loop() {
     }
     if (wallDetourActive()) {
         wallDetourUpdate();
+        if (!wallDetourActive() && lineFollowing()) completeChallenge(yellow);
         return;
     }
     if (updateBeep()) return;
@@ -268,10 +321,20 @@ void loop() {
         if (robot_control_background_time_us() > 4000) {
             colorReaction();
             if (state != orange) ignoreOrangeUntilClear = false;
+            if (state != pink) ignorePinkUntilClear = false;
         }
-        if (state == orange && !ignoreOrangeUntilClear) {
+        if (state == pink && !ignorePinkUntilClear) {
+            lineStop();
+            ignorePinkUntilClear = true;
+            objectChallenge = pink;
+            pickupRunning = pinStart();
+            if (!pickupRunning) robot_serial_message("Scan quille refuse. Robot arrete.");
+            return;
+        }
+        if (state == orange && !ignoreOrangeUntilClear && !(completedChallenges & challengeBit(orange))) {
             lineStop();
             ignoreOrangeUntilClear = true;
+            objectChallenge = orange;
             pickupRunning = cupStart();
             robot_serial_message(pickupRunning ? "Orange : recherche du verre." :
                                  "Ramassage refuse. Robot arrete.");
@@ -292,7 +355,7 @@ void loop() {
             return;
         }
         if (blueInhibited && millis() - wokeAt >= BLUE_INHIBIT_MS) blueInhibited = false;
-        if (state != reading && state != cyan && state != yellow && state != orange && !(state == blue && blueInhibited)) {
+        if (state != reading && state != cyan && state != yellow && state != orange && state != pink && !(state == blue && blueInhibited)) {
             lineStop();
             waitingForWake = state == blue;
             const char *const names[] = {"inconnue", "rose", "bleu", "turquoise", "orange", "jaune"};
@@ -307,6 +370,8 @@ void loop() {
     if (startAfterBeep) {
         startAfterBeep = false;
         if (lineStart()) {
+            if (waitingForWake) completeChallenge(blue);
+            if (courseFinished) return;
             blueInhibited = waitingForWake;
             wokeAt = millis();
             waitingForWake = false;

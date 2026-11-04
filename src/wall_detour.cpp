@@ -11,7 +11,7 @@ enum class Phase { Idle, LookingForWall, WallStop, RightTurn,
 
 constexpr float SEARCH_LIMIT_M = 1.0f;
 constexpr float FIRST_LEG_DISTANCE_M = 0.50f;
-constexpr float SECOND_LEG_DISTANCE_M = 0.650f;
+constexpr float SECOND_LEG_DISTANCE_M = 0.450f;
 constexpr float SEARCH_SPEED_M_S = 0.2f;
 constexpr float LEG_SPEED_M_S = 0.8f;
 constexpr float TURN_SPEED_RAD_S = 4.40f;

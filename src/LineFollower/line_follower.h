@@ -6,7 +6,7 @@ constexpr uint8_t LINE_PINS[3] = {A10, A11, A12}; // Gauche, milieu, droite.
 constexpr uint16_t LINE_WHITE_DEFAULT[3] = {46, 32, 30};
 constexpr uint16_t LINE_BLACK_DEFAULT[3] = {443, 500, 451};
 
-constexpr float LINE_BASE_SPEED = 0.55f;
+constexpr float LINE_BASE_SPEED = 0.65f;
 constexpr float LINE_KP = 0.14f;
 constexpr float LINE_KI = 0.005f;
 constexpr float LINE_KD = 0.005f;

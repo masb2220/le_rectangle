@@ -4,6 +4,12 @@
 // Angle par rapport a l'orientation ou le capteur gauche detecte l'objet.
 // Positif = tourner a gauche ; negatif = tourner a droite.
 constexpr float SCAN_OFFSET_DEG = -5.0f;
+// Capteur vers l'arriere : correction d'alignement avant le recul.
+constexpr float PIN_OFFSET_DEG = 0.0f;
+constexpr float PIN_CONTACT_ADJUST_M = 0.0f;
+constexpr float PIN_RIGHT_SPEED_M_S = 0.45f;
+constexpr float PIN_LEFT_SPEED_M_S = 0.15f;
+constexpr float PIN_RETURN_SPEED_M_S = 0.25f;
 constexpr float OFFSET_STEP_DEG = 1.0f;
 constexpr float SCAN_SPEED_RAD_S = 1.20f;
 constexpr float LEFT_DETECTION_MAX_CM = 50.0f;
